@@ -71,6 +71,39 @@ func Map[T any, V any](it Iterator[T], fn func(T) V) Iterator[V] {
 	return &mapIter[T, V]{wrappedIt: it, fn: fn}
 }
 
+type FlatMapIter[T, U any, Wrapped Iterator[T], FWrapped Iterator[U]] struct {
+	wrapped     Wrapped
+	hasFWrapped bool
+	fWrapped    FWrapped
+	fn          func(T) FWrapped
+}
+
+func FlatMap[T, U any, Wrapped Iterator[T], FWrapped Iterator[U]](it Wrapped, fn func(T) FWrapped) *FlatMapIter[T, U, Wrapped, FWrapped] {
+	return &FlatMapIter[T, U, Wrapped, FWrapped]{
+		wrapped: it,
+		fn:      fn,
+	}
+}
+
+func (fm *FlatMapIter[T, U, Wrapped, FWrapped]) HasNext() bool {
+	for !fm.hasFWrapped || !fm.fWrapped.HasNext() {
+		if !fm.wrapped.HasNext() {
+			return false
+		}
+		fm.fWrapped = fm.fn(fm.wrapped.Next())
+		fm.hasFWrapped = true
+	}
+	return true
+}
+
+func (fm *FlatMapIter[T, U, Wrapped, FWrapped]) Next() U {
+	for !fm.hasFWrapped || !fm.fWrapped.HasNext() {
+		fm.fWrapped = fm.fn(fm.wrapped.Next())
+		fm.hasFWrapped = true
+	}
+	return fm.fWrapped.Next()
+}
+
 // Reduce applies a function of two arguments cumulatively to the items of
 // the given iterator from the beginning to the end.
 // Reduce moves the given iterator it to its end such that after a Reduce
