@@ -39,7 +39,7 @@ type MapElem[K any, V any] struct {
 	Value V
 }
 
-type Zipped[T1 any, T2 any] struct {
+type Pair[T1 any, T2 any] struct {
 	First  T1
 	Second T2
 }

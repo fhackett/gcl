@@ -254,12 +254,12 @@ func TestZip(t *testing.T) {
 	it2 := goslices.Iter([]string{"a", "b", "c"})
 	zipped := iters.Zip[int, string](it1, it2)
 
-	want := goslices.Iter([]gcl.Zipped[int, string]{
+	want := goslices.Iter([]gcl.Pair[int, string]{
 		{First: 1, Second: "a"},
 		{First: 2, Second: "b"},
 	})
 
-	if !iters.Equal[gcl.Zipped[int, string]](zipped, want) {
+	if !iters.Equal[gcl.Pair[int, string]](zipped, want) {
 		t.Error("Wrong Zip result")
 	}
 	if it1.HasNext() {
