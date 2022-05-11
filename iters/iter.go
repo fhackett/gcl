@@ -68,6 +68,32 @@ type Iterator[T any] interface {
 	Generate(config IterConfig, fn IterFunc[T])
 }
 
+type emptyIterator[T any] struct{}
+
+func (it emptyIterator[T]) Generate(config IterConfig, _ IterFunc[T]) {
+	defer config.RunDefers()
+	// do nothing, we're empty
+}
+
+func Empty[T any]() Iterator[T] {
+	return emptyIterator[T]{}
+}
+
+type singleIterator[T any] struct {
+	value T
+}
+
+func (it singleIterator[T]) Generate(config IterConfig, fn IterFunc[T]) {
+	defer config.RunDefers()
+	_ = fn(it.value)
+}
+
+func Single[T any](value T) Iterator[T] {
+	return singleIterator[T]{
+		value: value,
+	}
+}
+
 type skipIterator[T any] struct {
 	super Iterator[T]
 	count int
@@ -211,11 +237,12 @@ type repeatIterator[T any] struct {
 
 func (it repeatIterator[T]) Generate(config IterConfig, fn IterFunc[T]) {
 	state := config.ToInitState()
+	defer config.RunDefers()
+
 	for !state.IsStop() {
 		elem := it.generator()
 		state = state.Concat(fn(elem))
 	}
-	config.RunDefers()
 }
 
 func Repeat[T any](generator func() T) Iterator[T] {
@@ -232,6 +259,9 @@ type zipIterator[T, U any] struct {
 func (it zipIterator[T, U]) Generate(config IterConfig, fn IterFunc[gcl.Pair[T, U]]) {
 	iterStateCh := make(chan IterState)
 	rightElems := make(chan U)
+
+	defer config.RunDefers()
+
 	go func() {
 		it.right.Generate(config.WithoutDefers(), func(elem U) IterState {
 			rightElems <- elem
@@ -251,8 +281,6 @@ func (it zipIterator[T, U]) Generate(config IterConfig, fn IterFunc[gcl.Pair[T, 
 		iterStateCh <- iterState
 		return iterState
 	})
-
-	config.RunDefers()
 }
 
 // Zip zips the two given iterators and returns a single iterator over
@@ -264,12 +292,14 @@ func Zip[T, U any](left Iterator[T], right Iterator[U]) Iterator[gcl.Pair[T, U]]
 	}
 }
 
-type ConcatIterator[T any] struct {
+type concatIterator[T any] struct {
 	first, second Iterator[T]
 }
 
-func (it ConcatIterator[T]) Generate(config IterConfig, fn IterFunc[T]) {
-	var state = config.ToInitState()
+func (it concatIterator[T]) Generate(config IterConfig, fn IterFunc[T]) {
+	state := config.ToInitState()
+	defer config.RunDefers()
+
 	it.first.Generate(config.WithoutDefers(), func(elem T) IterState {
 		state = fn(elem)
 		return state
@@ -277,12 +307,54 @@ func (it ConcatIterator[T]) Generate(config IterConfig, fn IterFunc[T]) {
 	it.second.Generate(state.ToConfig(), func(elem T) IterState {
 		return fn(elem)
 	})
-	config.RunDefers()
 }
 
 func Concat[T any](first, second Iterator[T]) Iterator[T] {
-	return ConcatIterator[T]{
+	return concatIterator[T]{
 		first:  first,
 		second: second,
+	}
+}
+
+type sliceElementsIterator[T any] struct {
+	slice []T
+}
+
+func (it sliceElementsIterator[T]) Generate(config IterConfig, fn IterFunc[T]) {
+	defer config.RunDefers()
+	for _, elem := range it.slice {
+		state := fn(elem)
+		if state.IsStop() {
+			return
+		}
+	}
+}
+
+func SliceElements[T any](slice []T) Iterator[T] {
+	return sliceElementsIterator[T]{
+		slice: slice,
+	}
+}
+
+type mapElementsIterator[K comparable, V any] struct {
+	m map[K]V
+}
+
+func (it mapElementsIterator[K, V]) Generate(config IterConfig, fn IterFunc[gcl.Pair[K, V]]) {
+	defer config.RunDefers()
+	for k, v := range it.m {
+		state := fn(gcl.Pair[K, V]{
+			First:  k,
+			Second: v,
+		})
+		if state.IsStop() {
+			return
+		}
+	}
+}
+
+func MapElements[K comparable, V any](m map[K]V) Iterator[gcl.Pair[K, V]] {
+	return mapElementsIterator[K, V]{
+		m: m,
 	}
 }
