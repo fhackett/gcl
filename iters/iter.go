@@ -18,7 +18,12 @@ func (config IterConfig) AddDefers(defers []func()) IterConfig {
 	return config
 }
 
-func (config IterConfig) GetInitState() IterState {
+func (config IterConfig) WithoutDefers() IterConfig {
+	config.Defers = nil
+	return config
+}
+
+func (config IterConfig) ToInitState() IterState {
 	if config.ShouldStop {
 		return IterStop
 	} else {
@@ -36,6 +41,10 @@ type IterState int
 
 func (state IterState) IsStop() bool {
 	return state == IterStop
+}
+
+func (state IterState) ToConfig() IterConfig {
+	return IterConfig{ShouldStop: state == IterStop}
 }
 
 func (state IterState) Concat(other IterState) IterState {
@@ -201,7 +210,7 @@ type repeatIterator[T any] struct {
 }
 
 func (it repeatIterator[T]) Generate(config IterConfig, fn IterFunc[T]) {
-	state := config.GetInitState()
+	state := config.ToInitState()
 	for !state.IsStop() {
 		elem := it.generator()
 		state = state.Concat(fn(elem))
@@ -224,13 +233,13 @@ func (it zipIterator[T, U]) Generate(config IterConfig, fn IterFunc[gcl.Pair[T, 
 	iterStateCh := make(chan IterState)
 	rightElems := make(chan U)
 	go func() {
-		it.right.Generate(IterConfig{ShouldStop: config.ShouldStop}, func(elem U) IterState {
+		it.right.Generate(config.WithoutDefers(), func(elem U) IterState {
 			rightElems <- elem
 			return <-iterStateCh
 		})
 		close(rightElems)
 	}()
-	it.left.Generate(IterConfig{ShouldStop: config.ShouldStop}, func(leftElem T) IterState {
+	it.left.Generate(config.WithoutDefers(), func(leftElem T) IterState {
 		rightElem, ok := <-rightElems
 		if !ok {
 			return IterStop
@@ -252,5 +261,28 @@ func Zip[T, U any](left Iterator[T], right Iterator[U]) Iterator[gcl.Pair[T, U]]
 	return zipIterator[T, U]{
 		left:  left,
 		right: right,
+	}
+}
+
+type ConcatIterator[T any] struct {
+	first, second Iterator[T]
+}
+
+func (it ConcatIterator[T]) Generate(config IterConfig, fn IterFunc[T]) {
+	var state = config.ToInitState()
+	it.first.Generate(config.WithoutDefers(), func(elem T) IterState {
+		state = fn(elem)
+		return state
+	})
+	it.second.Generate(state.ToConfig(), func(elem T) IterState {
+		return fn(elem)
+	})
+	config.RunDefers()
+}
+
+func Concat[T any](first, second Iterator[T]) Iterator[T] {
+	return ConcatIterator[T]{
+		first:  first,
+		second: second,
 	}
 }
